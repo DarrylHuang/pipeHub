@@ -1,0 +1,13 @@
+[
+  {
+    "kafkaConfig": {
+      "servers": "172.27.199.161:9092",
+      "topics": "send-center-sms",
+      "groupId": "send-center-sms-group"
+    },
+    "httpEndPointConfig": {
+      "url": "http://localhost:9494/api/data/ev_feedback",
+      "authKey": "Authorization"
+    }
+  }
+]

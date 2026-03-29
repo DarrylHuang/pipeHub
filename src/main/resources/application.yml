@@ -1,0 +1,9 @@
+spring:
+  application:
+    name: pipeHub
+  profiles:
+    active: dev
+server:
+  port: 9494
+#  servlet:
+#    context-path: /pipeHub
