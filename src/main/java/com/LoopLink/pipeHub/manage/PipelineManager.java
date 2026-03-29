@@ -24,10 +24,10 @@ import java.util.concurrent.atomic.AtomicReference;
 @Component
 @RequiredArgsConstructor
 public class PipelineManager {
-    private static final String DICTIONARY = "pipeline";
-    private static final String DATA = "/static/data.json";
-    private static final Path RECORDS = Paths.get(DICTIONARY, DATA);
-    private static final ClassPathResource CLASSPATH_RESOURCE = new ClassPathResource(DATA);
+    private static final String EXTERNAL_DICTIONARY = "pipeline";
+    private static final String DATA = "data.json";
+    private static final Path RECORDS = Paths.get(EXTERNAL_DICTIONARY, DATA);
+    private static final ClassPathResource CLASSPATH_RESOURCE = new ClassPathResource("/static" + "/" + DATA);
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final AtomicReference<PipelineInfo> infoRef = new AtomicReference<>(new PipelineInfo(Collections.emptyList(), LocalDateTime.now()));
