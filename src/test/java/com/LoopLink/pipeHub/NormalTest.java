@@ -1,13 +1,24 @@
 package com.LoopLink.pipeHub;
 
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 
+import java.util.Arrays;
+import java.util.List;
 import java.util.Properties;
 
 @Slf4j
-public class KafkaTestProducer {
+public class NormalTest {
+    // public static void main(String[] args) {
+    //     String servers = "localhost:9092,null,kafka-01:9092";
+    //
+    //     List<String> list = Arrays.asList(StringUtils.split(servers, ","));
+    //
+    //     System.out.println(list);
+    // }
+
     public static void main(String[] args) {
         Properties props = new Properties();
         props.put("bootstrap.servers", "172.27.199.161:9092");
