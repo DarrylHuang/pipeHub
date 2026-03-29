@@ -37,7 +37,7 @@ public class KafkaHttpEndpointChannel {
         this.httpEndpoint = httpEndpoint;
         this.httpAgent = httpAgent;
 
-        this.channelName = "Channel[kafka => http]:" + kafkaConfig.getServers() + ":" + kafkaConfig.getTopics() + " to " + httpEndpoint.getUrl();
+        this.channelName = "Channel[kafka => http]:" + kafkaConfig.getServers() + ":" + kafkaConfig.getTopics() + " TO " + httpEndpoint.getUrl();
 
         link();
     }
