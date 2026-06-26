@@ -1,5 +1,6 @@
 package com.github.pipeHub.enums;
 
+import com.github.pipeHub.handler.AuthValueHandler;
 import lombok.Getter;
 
 @Getter
