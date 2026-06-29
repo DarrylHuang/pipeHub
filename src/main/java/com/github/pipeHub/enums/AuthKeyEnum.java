@@ -1,10 +1,9 @@
 package com.github.pipeHub.enums;
 
-import com.github.pipeHub.handler.AuthValueHandler;
 import lombok.Getter;
 
 @Getter
-public enum AuthKeyEnum implements AuthValueHandler {
+public enum AuthKeyEnum {
     X_PROXY_TOKEN("X-Proxy-Token") {
         @Override
         public String handleAuth(String authValue) {
@@ -37,4 +36,6 @@ public enum AuthKeyEnum implements AuthValueHandler {
         }
         return null;
     }
+
+    public abstract String handleAuth(String authValue);
 }
