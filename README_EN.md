@@ -222,7 +222,6 @@ The `Pipeline` abstract base class + `KafkaHttpEndpointPipeline` concrete implem
 | Medium | Bare threads used instead of `ExecutorService` | Switch to a thread pool for better lifecycle management and graceful shutdown |
 | Medium | `enable.auto.commit=true` coexists with manual `commitSync()` | Disable auto-commit and use manual commit exclusively |
 | Medium | `analyseMessage` empty-string check is inconsistent with caller-side `null` checks | Standardize on returning `null` for invalid messages |
-| Low | Large amounts of commented-out code | Clean up dead code and rely on version control for history |
 
 ---
 
