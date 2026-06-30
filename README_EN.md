@@ -10,7 +10,7 @@
 
 pipeHub is a Spring Boot-based integration pipeline service. Its core responsibility is **bridging two endpoints (Kafka Source → HTTP Destination)**. It reads Pipeline rules defined in a JSON configuration file, automatically establishes Kafka Consumers on startup, continuously polls for messages, and forwards them to target endpoints via HTTP POST.
 
-Use case: decoupled integration between the Kafka ecosystem and REST API services — enabling message delivery without embedding the Kafka SDK in business services.
+Use case: decoupled integration between the Kafka ecosystem and REST API services — transit data continuously without embedding the Kafka SDK.
 
 ---
 

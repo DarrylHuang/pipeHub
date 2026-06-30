@@ -10,7 +10,7 @@
 
 pipeHub 是一个基于 Spring Boot 的集成管道服务。它的核心职责是**连接两个端点（Kafka Source → HTTP Destination）**，通过读取 JSON 配置文件中定义的 Pipeline 规则，在应用启动时自动建立 Kafka Consumer，持续轮询消息并以 HTTP POST 方式转发到目标接口。
 
-适用场景：Kafka 生态系统与 REST API 服务之间的解耦集成，无需在业务服务中引入 Kafka SDK，即可实现消息推送。
+适用场景：Kafka 生态系统与 REST API 服务之间的解耦集成，无需引入 Kafka SDK，即可实现实时数据流转。
 
 ---
 
