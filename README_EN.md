@@ -74,10 +74,12 @@ src/main/java/com/github/pipeHub/
 ├── model/
 │   ├── Pipeline.java                         # Abstract base class for pipelines
 │   ├── KafkaHttpEndpointPipeline.java        # Kafka → HTTP pipeline configuration model
-│   ├── KafkaHttpEndpointBridge.java          # Pipeline holder, a pair of Kafka and http endpoint bridge
+│   ├── KafkaHttpEndpointBridge.java          # Pipeline holder, a pair of Kafka and HTTP endpoint bridge
 │   ├── KafkaHttpEndpointChannel.java         # KafkaHttpEndpointChannel is hold by KafkaHttpEndpointBridge, a kernel class of loop consuming transiting logic processing
 │   ├── KafkaConfig.java                      # Kafka connection configuration
 │   └── HttpEndPointConfig.java               # HTTP endpoint + authentication configuration
+├── response/
+│   └── Result.java                           # HTTP endpoint interface response structure
 ├── service/
 │   ├── KafkaHttpEndpointPipelineService.java          # Service interface
 │   ├── KafkaHttpEndpointPipelineRestorer.java         # Startup listener

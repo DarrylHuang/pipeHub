@@ -74,10 +74,12 @@ src/main/java/com/github/pipeHub/
 ├── model/
 │   ├── Pipeline.java                         # Pipeline 抽象基类
 │   ├── KafkaHttpEndpointPipeline.java        # Kafka → HTTP Pipeline 配置模型
-│   ├── KafkaHttpEndpointBridge.java          # Pipeline 持有者，一组 Kafka 和 http 端点桥接器
+│   ├── KafkaHttpEndpointBridge.java          # Pipeline 持有者，一组 Kafka 和 HTTP 端点桥接器
 │   ├── KafkaHttpEndpointChannel.java         # KafkaHttpEndpointBridge 桥接器持有 KafkaHttpEndpointChannel，核心循环消费投递逻辑处理类
 │   ├── KafkaConfig.java                      # Kafka 连接配置
 │   └── HttpEndPointConfig.java               # HTTP 端点 + 认证配置
+├── response/
+│   └── Result.java                           # HTTP 端点接口返回值结构
 ├── service/
 │   ├── KafkaHttpEndpointPipelineService.java          # 服务接口
 │   ├── KafkaHttpEndpointPipelineRestorer.java         # 启动监听器
