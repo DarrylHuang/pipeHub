@@ -28,26 +28,26 @@ Use case: decoupled integration between the Kafka ecosystem and REST API service
 ## Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        pipeHub                              │
-│                                                             │
-│  ┌───────────────┐     ┌────────────────────────────────┐   │
-│  │PipelineManager│────▶│KafkaHttpEndpointPipelineService│   │
-│  │  (data.json)  │     └──────────────┬─────────────────┘   │
-│  └───────────────┘                    │                     │
-│                                       ▼                     │
-│                         ┌─────────────────────────┐         │
-│                         │ KafkaHttpEndpointBridge │         │
-│                         │  (per pipeline)         │         │
-│                         └────────────┬────────────┘         │
-│                                      │                      │
-│                                      ▼                      │
-│                         ┌─────────────────────────┐         │
-│                         │KafkaHttpEndpointChannel │         │
-│                         │  [Daemon Thread]        │         │
-│                         │  poll() & send()        │         │
-│                         └────────────┬────────────┘         │
-└──────────────────────────────────────┼──────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                        pipeHub                                  │
+│                                                                 │
+│  ┌───────────────┐        ┌─────────────────────────────────┐   │
+│  │PipelineManager│ ────▶  │KafkaHttpEndpointPipelineService │   │
+│  │  (data.json)  │        └──────────────┬──────────────────┘   │
+│  └───────────────┘                       │                      │
+│                                          ▼                      │
+│                         ┌─────────────────────────┐             │
+│                         │ KafkaHttpEndpointBridge │             │
+│                         │  (per pipeline)         │             │
+│                         └────────────┬────────────┘             │
+│                                      │                          │
+│                                      ▼                          │
+│                         ┌─────────────────────────┐             │
+│                         │KafkaHttpEndpointChannel │             │
+│                         │  [Daemon Thread]        │             │
+│                         │  poll() & send()        │             │
+│                         └────────────┬────────────┘             │
+└──────────────────────────────────────┼──────────────────────────┘
                                        │
           ┌────────────────────────────┼──────────────────┐
           ▼                                               ▼
@@ -73,9 +73,9 @@ src/main/java/com/github/pipeHub/
 │   └── PipelineManager.java                  # Configuration loading and management
 ├── model/
 │   ├── Pipeline.java                         # Abstract base class for pipelines
-│   ├── KafkaHttpEndpointPipeline.java        # Kafka→HTTP pipeline configuration model
-│   ├── KafkaHttpEndpointBridge.java          # Pipeline factory / lifecycle holder
-│   ├── KafkaHttpEndpointChannel.java         # Core consume-and-deliver loop
+│   ├── KafkaHttpEndpointPipeline.java        # Kafka → HTTP pipeline configuration model
+│   ├── KafkaHttpEndpointBridge.java          # Pipeline holder, a pair of Kafka and http endpoint bridge
+│   ├── KafkaHttpEndpointChannel.java         # KafkaHttpEndpointChannel is hold by KafkaHttpEndpointBridge, a kernel class of loop consuming transiting logic processing
 │   ├── KafkaConfig.java                      # Kafka connection configuration
 │   └── HttpEndPointConfig.java               # HTTP endpoint + authentication configuration
 ├── service/
