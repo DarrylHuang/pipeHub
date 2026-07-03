@@ -71,7 +71,7 @@ public class KafkaHttpEndpointChannel {
                                 log.error("the Http endpoint is blocked for some reason, Kafka polling offset cursor is paused at {}. ", System.currentTimeMillis());
                                 log.error("Http endpoint: {}", httpEndpoint.getUrl());
                                 log.error("Kafka server: {}", kafkaConfig.getServers());
-                                log.error("Kafka topics: {}", kafkaConfig.getTopics());
+                                log.error("Kafka topic: {}", record.topic());
                                 log.error("partition: {}", record.partition());
                                 log.error("offset: {}", record.offset());
                                 log.error("key: {}", record.key());
