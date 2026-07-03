@@ -222,7 +222,6 @@ The `Pipeline` abstract base class + `KafkaHttpEndpointPipeline` concrete implem
 | High | SSL trusts all certificates (`TrustAll` + `NoopHostnameVerifier`) | Configure a proper certificate trust chain |
 | High | Auth tokens stored in plaintext in the configuration file | Use environment variables or a secrets management service |
 | Medium | Bare threads used instead of `ExecutorService` | Switch to a thread pool for better lifecycle management and graceful shutdown |
-| Medium | `enable.auto.commit=true` coexists with manual `commitSync()` | Disable auto-commit and use manual commit exclusively |
 | Medium | `analyseMessage` empty-string check is inconsistent with caller-side `null` checks | Standardize on returning `null` for invalid messages |
 
 ---

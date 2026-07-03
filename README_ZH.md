@@ -222,7 +222,6 @@ classpath:/static/data.json  ──缺省──▶  加载内置配置
 | 高    | SSL 信任所有证书 (`TrustAll` + `NoopHostnameVerifier`) | 配置正确的证书信任链 |
 | 高    | Auth Token 明文写入配置文件 | 使用环境变量或密钥管理服务 |
 | 中    | 使用裸线程而非 `ExecutorService` | 改用线程池便于生命周期管理和优雅关闭 |
-| 中    | `enable.auto.commit=true` 与手动 `commitSync()` 并存 | 禁用自动提交，统一使用手动提交 |
 | 中    | `analyseMessage` 空字符串检查与调用方 `null` 检查不一致 | 统一返回 `null` 表示无效消息 |
 
 ---

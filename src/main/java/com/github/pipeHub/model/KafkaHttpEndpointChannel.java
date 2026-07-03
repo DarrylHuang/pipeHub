@@ -11,13 +11,17 @@ import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.util.EntityUtils;
 import org.apache.kafka.clients.consumer.Consumer;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Getter
@@ -34,7 +38,8 @@ public class KafkaHttpEndpointChannel {
     public KafkaHttpEndpointChannel(KafkaConfig kafkaConfig, HttpEndPointConfig httpEndpoint, CloseableHttpClient httpAgent) {
         this.kafkaConfig = kafkaConfig;
         this.consumer = new KafkaConsumer<>(kafkaConfig.toConsumerProperties());
-        this.consumer.subscribe(Collections.singletonList(kafkaConfig.getTopics()));
+        List<String> topicList = Arrays.stream(StringUtils.split(kafkaConfig.getTopics(), ",")).map(String::trim).filter(StringUtils::isNotBlank).distinct().collect(Collectors.toList());
+        this.consumer.subscribe(topicList);
 
         this.httpEndpoint = httpEndpoint;
         this.httpAgent = httpAgent;
@@ -45,24 +50,40 @@ public class KafkaHttpEndpointChannel {
     }
 
     public void link() {
-        Thread thread = new Thread(this::loopDispatch, channelName);
+        Thread thread = new Thread(this::dispatchLoop, channelName);
         thread.setDaemon(true);
         thread.start();
     }
 
-    private void loopDispatch() {
+    private void dispatchLoop() {
         log.info("{} started consuming from topics {}", channelName, kafkaConfig.getTopics());
         try {
             while (true) {
                 ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(POLL_TIMEOUT_MS));
                 if (!records.isEmpty()) {
-                    records.forEach(record -> {
+                    boolean isDispatched = true;
+                    for (ConsumerRecord<String, String> record : records) {
                         String message = analyseMessage(record.value());
                         if (message != null) {
-                            send(message);
+                            if (!send(message)) {
+                                isDispatched = false;
+
+                                log.error("the Http endpoint is blocked for some reason, Kafka polling offset cursor is paused at {}. ", System.currentTimeMillis());
+                                log.error("Http endpoint: {}", httpEndpoint.getUrl());
+                                log.error("Kafka server: {}", kafkaConfig.getServers());
+                                log.error("Kafka topics: {}", kafkaConfig.getTopics());
+                                log.error("partition: {}", record.partition());
+                                log.error("offset: {}", record.offset());
+                                log.error("key: {}", record.key());
+
+                                break;
+                            }
                         }
-                    });
-                    consumer.commitSync();
+                    }
+
+                    if (isDispatched) {
+                        consumer.commitSync();
+                    }
                 }
             }
         } catch (Exception e) {
@@ -80,7 +101,7 @@ public class KafkaHttpEndpointChannel {
         return message;
     }
 
-    private void send(String message) {
+    private boolean send(String message) {
         AuthKeyEnum authKeyEnum = AuthKeyEnum.of(httpEndpoint.getAuthKey());
 
         int attempt = 0;
@@ -119,13 +140,16 @@ public class KafkaHttpEndpointChannel {
                     TimeUnit.MILLISECONDS.sleep(500);
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
-                    return;
+                    return false;
                 }
             }
         } while (!success && attempt < POST_MAX_RETRY);
 
         if (!success) {
             log.error("{} failed to send message after {} attempts: {}", channelName, POST_MAX_RETRY, message);
+            return false;
+        } else {
+            return true;
         }
     }
 
