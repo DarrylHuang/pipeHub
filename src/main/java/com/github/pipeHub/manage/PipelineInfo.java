@@ -15,5 +15,4 @@ public class PipelineInfo {
 
     @JsonFormat(pattern = "MMM dd, yyyy HH:mm:ss", locale = "en")
     private LocalDateTime timestamp;
-
 }
