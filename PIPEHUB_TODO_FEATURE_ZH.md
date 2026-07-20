@@ -52,7 +52,7 @@ pipehub> exit
 
 继续将 Spring Boot 作为常驻后台服务。服务端职责包括：
 
-- 应用启动时只恢复 `enabled = true` 的传输线；
+- 应用启动时根据数据库中的期望状态恢复传输线；
 - 暴露本地管理 API，用于传输线运维操作；
 - 将传输线配置和生命周期状态持久化到内嵌数据库；
 - 在内存中维护当前正在运行的传输线注册表。
@@ -108,7 +108,7 @@ PipelineRuntimeManager
         +-- stop(id)
         +-- restart(id)
         +-- list()
-        +-- startEnabledOnBoot()
+        +-- reconcileDesiredState()
 ```
 
 运行时管理器需要维护当前活跃传输线：
@@ -129,25 +129,171 @@ KafkaHttpEndpointChannel.shutdown()
 
 ```text
 应用启动
-  -> 从 H2 查询 enabled = true 的传输线
-  -> 逐条启动
+  -> 从 H2 查询 desired_status
+  -> 启动期望状态为 RUNNING 的传输线
+  -> 停止或保持停止期望状态为 STOPPED 的传输线
   -> 将活跃 bridge 注册到内存
 
 pipehub stop <id>
   -> 调用服务端管理 API
-  -> 服务端按 id 查找活跃 bridge
-  -> bridge.shutdown()
-  -> 更新数据库 runtime_status = STOPPED
-  -> 如果停止状态需要在重启后保留，则更新 enabled = false
+  -> 服务端更新 desired_status = STOPPED
+  -> 后台 Reconciler 停止活跃运行时
+  -> 停止成功后更新 runtime_status = STOPPED
 
 pipehub start <id>
   -> 调用服务端管理 API
-  -> 服务端从 H2 读取传输线配置
-  -> 创建 Kafka consumer 运行时
-  -> 将 bridge 注册到内存
-  -> 更新数据库 runtime_status = RUNNING
-  -> 如果启动状态需要在重启后保留，则更新 enabled = true
+  -> 服务端更新 desired_status = RUNNING
+  -> 后台 Reconciler 启动运行时
+  -> 启动成功后更新 runtime_status = RUNNING
 ```
+
+## Desired State + Reconciler 方案
+
+长期生命周期管理建议采用期望状态模型，而不是让 REST 请求同步负责完整的启动或停止过程。
+
+核心思想：
+
+```text
+数据库状态：运维人员希望传输线处于什么状态
+内存状态：  传输线当前实际是否正在运行
+Reconciler：比较两边状态，并把实际运行状态拉齐到期望状态
+```
+
+例如：
+
+```text
+desired_status = RUNNING
+runtime_status = STOPPED
+```
+
+Reconciler 应该启动这条传输线。
+
+另一个例子：
+
+```text
+desired_status = STOPPED
+runtime_status = RUNNING
+```
+
+Reconciler 应该停止这条传输线。
+
+推荐请求流程：
+
+```text
+CLI -> REST API -> 持久化 desired_status -> 返回 202 Accepted
+Reconciler -> 对比期望状态和实际运行状态 -> 启动或停止运行时 -> 持久化 runtime_status
+```
+
+推荐触发策略：
+
+```text
+主路径：命令触发单条 pipeline reconcile
+启动路径：Spring Boot 应用启动时全量 reconcile 一次
+兜底路径：低频定时全量 reconcile
+```
+
+Reconciler 不需要依赖高频轮询。
+当运维人员执行 `pipehub start <id>` 或 `pipehub stop <id>` 时，服务端应该先持久化 `desired_status`，然后在数据库事务提交后立即请求协调这一条传输线。
+
+```text
+POST /admin/pipelines/{id}/stop
+  -> update desired_status = STOPPED
+  -> after commit
+  -> reconciler.request(id)
+  -> return 202 Accepted
+```
+
+示意代码：
+
+```java
+public void request(String pipelineId) {
+    executor.submit(() -> reconcileOne(pipelineId));
+}
+```
+
+低频定时任务仍然建议保留，但它的定位是恢复兜底，而不是主驱动：
+
+```java
+@Scheduled(fixedDelay = 30000)
+public void reconcileAll() {
+    repository.findAll().forEach(p -> request(p.getId()));
+}
+```
+
+定时任务的价值在于：
+
+- 启动或停止过程中进程崩溃后，可以继续恢复；
+- 数据库状态和内存运行状态偶发不一致时，可以自动修正；
+- 如果运维绕过 API 直接修改 H2 数据库，也能被发现；
+- 某条传输线异常失败后，如果 `desired_status` 仍然是 `RUNNING`，可以决定是否自动拉起。
+
+对当前项目来说，30 秒或 60 秒做一次全量 reconcile 通常已经足够。
+传输线数量大概率远小于 Kafka consumer 和 HTTP 投递本身的运行成本，因此 H2 配置表的低频扫描不应成为性能瓶颈。
+
+这个方案比用同步 SpringEvent 作为主流程更适合，因为：
+
+- 运维命令具备幂等性；
+- HTTP 请求不会被 Kafka 启动或停止过程阻塞；
+- 启停过程中进程崩溃，重启后仍能根据数据库继续恢复；
+- 数据库是运维意图的事实来源；
+- 生命周期逻辑集中在 `PipelineLifecycleService` 和 `PipelineRuntimeManager` 中，更容易排查。
+
+建议类结构：
+
+```text
+PipelineCommandController
+  -> PipelineDesiredStateService
+      -> PipelineRepository
+
+PipelineReconciler
+  -> PipelineRepository
+  -> PipelineRuntimeManager
+  -> PipelineLifecycleService
+```
+
+`PipelineCommandController` 只负责校验请求并更新 `desired_status`。
+`PipelineReconciler` 定时运行，对比数据库期望状态和内存实际状态，然后执行启动或停止。
+
+示意代码：
+
+```java
+@Scheduled(fixedDelay = 3000)
+public void reconcile() {
+    List<PipelineRecord> pipelines = repository.findAll();
+
+    for (PipelineRecord pipeline : pipelines) {
+        RuntimeState actual = runtimeManager.getActualState(pipeline.getId());
+
+        if (pipeline.wantRunning() && !actual.isRunningOrStarting()) {
+            lifecycleService.startRuntime(pipeline);
+        }
+
+        if (pipeline.wantStopped() && actual.isRunningOrStarting()) {
+            lifecycleService.stopRuntime(pipeline.getId());
+        }
+    }
+}
+```
+
+启动和停止仍然建议交给有界 `ExecutorService` 执行，避免某一个 Kafka 连接卡住后影响所有传输线的协调。
+
+SpringEvent 仍然可以使用，但定位应是旁路副作用，而不是主生命周期引擎：
+
+```text
+PipelineStartedEvent
+PipelineStoppedEvent
+PipelineFailedEvent
+PipelineStatusChangedEvent
+```
+
+适合事件监听器处理的事情：
+
+- 审计日志；
+- 指标统计；
+- 告警；
+- WebSocket 状态推送。
+
+不建议把核心启动、停止、回滚和持久化流程放进事件监听器。
 
 ## 建议数据库表
 
@@ -158,8 +304,11 @@ CREATE TABLE pipeline_config (
     id VARCHAR(128) PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     type VARCHAR(64) NOT NULL,
-    enabled BOOLEAN NOT NULL,
+    desired_status VARCHAR(32) NOT NULL,
     runtime_status VARCHAR(32) NOT NULL,
+    last_error CLOB,
+    version BIGINT NOT NULL,
+    updated_by VARCHAR(128),
     kafka_config_json CLOB NOT NULL,
     http_config_json CLOB NOT NULL,
     created_at TIMESTAMP NOT NULL,
@@ -172,16 +321,23 @@ CREATE TABLE pipeline_config (
 推荐状态值：
 
 ```text
+desired_status:
 RUNNING
 STOPPED
-FAILED
+
+runtime_status:
 STARTING
+RUNNING
 STOPPING
+STOPPED
+FAILED
 ```
 
-`enabled` 表示传输线是否需要在应用下次启动时自动恢复。
+`desired_status` 表示运维人员持久化下来的期望状态，用它替代更简单的 `enabled` 标记。
 
 `runtime_status` 表示传输线当前或最近一次运行状态。
+
+`version` 用于乐观锁或防止多个运维人员同时操作时发生状态覆盖。
 
 ## 管理 API 形态
 
@@ -286,7 +442,7 @@ OpenAPI spec 或清晰文档化的 JSON 请求/响应 DTO
 - 添加 H2 和 Spring JDBC。
 - 创建 `pipeline_config` 表。
 - 将 `data.json` 中的传输线迁移到数据库。
-- 给传输线模型添加 `id`、`enabled` 和 `runtime_status` 字段。
+- 给传输线模型添加 `id`、`desired_status`、`runtime_status` 和 `version` 字段。
 
 ### 阶段 2：运行时生命周期
 

@@ -1,4 +1,4 @@
-﻿# pipeHub TODO Feature Notes
+# pipeHub TODO Feature Notes
 
 ## Background
 
@@ -52,7 +52,7 @@ pipehub> exit
 
 Use Spring Boot as a long-running backend service. It should:
 
-- restore only enabled pipelines on application startup;
+- reconcile persisted desired pipeline state on application startup;
 - expose local management APIs for pipeline operations;
 - persist pipeline configuration and lifecycle state to an embedded database;
 - keep currently running pipelines in an in-memory runtime registry.
@@ -108,7 +108,7 @@ PipelineRuntimeManager
         +-- stop(id)
         +-- restart(id)
         +-- list()
-        +-- startEnabledOnBoot()
+        +-- reconcileDesiredState()
 ```
 
 The runtime manager should maintain a map of active pipelines:
@@ -129,25 +129,171 @@ Suggested lifecycle behavior:
 
 ```text
 Application startup
-  -> query enabled pipelines from H2
-  -> start each enabled pipeline
+  -> query desired_status from H2
+  -> start pipelines that should be RUNNING
+  -> stop or keep stopped pipelines that should be STOPPED
   -> register active bridge in memory
 
 pipehub stop <id>
   -> call server management API
-  -> server finds active bridge by id
-  -> bridge.shutdown()
-  -> update database status to STOPPED
-  -> update enabled to false if stop should survive restart
+  -> server updates desired_status = STOPPED
+  -> background reconciler stops the active runtime
+  -> update runtime_status = STOPPED after shutdown succeeds
 
 pipehub start <id>
   -> call server management API
-  -> server reads pipeline config from H2
-  -> create Kafka consumer runtime
-  -> register bridge in memory
-  -> update database status to RUNNING
-  -> update enabled to true if start should survive restart
+  -> server updates desired_status = RUNNING
+  -> background reconciler starts the runtime
+  -> update runtime_status = RUNNING after startup succeeds
 ```
+
+## Desired State and Reconciler
+
+The long-term lifecycle design should use a desired-state model instead of making the REST request directly own the whole start or stop operation.
+
+Core idea:
+
+```text
+database state: what operators want
+runtime state:  what is actually running in memory
+reconciler:     compares both sides and moves runtime state toward desired state
+```
+
+For example:
+
+```text
+desired_status = RUNNING
+runtime_status = STOPPED
+```
+
+The reconciler should start that pipeline.
+
+Another example:
+
+```text
+desired_status = STOPPED
+runtime_status = RUNNING
+```
+
+The reconciler should stop that pipeline.
+
+Recommended request flow:
+
+```text
+CLI -> REST API -> persist desired_status -> return 202 Accepted
+Reconciler -> compare desired state and actual runtime -> start or stop runtime -> persist runtime_status
+```
+
+Recommended trigger strategy:
+
+```text
+Primary path: command-triggered single-pipeline reconcile
+Startup path: full reconcile once when the Spring Boot application starts
+Fallback path: low-frequency scheduled full reconcile
+```
+
+The reconciler does not need to depend on high-frequency polling.
+When an operator runs `pipehub start <id>` or `pipehub stop <id>`, the server should persist `desired_status` first, then immediately request reconciliation for that single pipeline after the database transaction commits.
+
+```text
+POST /admin/pipelines/{id}/stop
+  -> update desired_status = STOPPED
+  -> after commit
+  -> reconciler.request(id)
+  -> return 202 Accepted
+```
+
+Sketch:
+
+```java
+public void request(String pipelineId) {
+    executor.submit(() -> reconcileOne(pipelineId));
+}
+```
+
+A low-frequency scheduled task should still exist as a recovery mechanism rather than the main driver:
+
+```java
+@Scheduled(fixedDelay = 30000)
+public void reconcileAll() {
+    repository.findAll().forEach(p -> request(p.getId()));
+}
+```
+
+The scheduled task is useful for:
+
+- recovering after the process crashes during start or stop;
+- correcting occasional differences between database state and in-memory runtime state;
+- detecting manual database changes if operators bypass the API;
+- deciding whether to restart a failed pipeline whose `desired_status` is still `RUNNING`.
+
+For this project, a 30-second or 60-second full reconcile is enough in most cases.
+The expected number of pipelines is likely much smaller than the cost of Kafka consumers and HTTP delivery, so the H2 table scan itself should not be the performance bottleneck.
+
+This is better than a synchronous Spring event as the main control flow because:
+
+- operator commands become idempotent;
+- HTTP requests do not block on Kafka startup or shutdown;
+- process crashes during start or stop can be recovered after restart;
+- the database remains the source of truth for operator intent;
+- lifecycle logic is explicit in `PipelineLifecycleService` and `PipelineRuntimeManager`.
+
+Suggested classes:
+
+```text
+PipelineCommandController
+  -> PipelineDesiredStateService
+      -> PipelineRepository
+
+PipelineReconciler
+  -> PipelineRepository
+  -> PipelineRuntimeManager
+  -> PipelineLifecycleService
+```
+
+`PipelineCommandController` should only validate the request and update `desired_status`.
+`PipelineReconciler` should run periodically, compare database desired state with actual in-memory runtime state, and execute start or stop work.
+
+Sketch:
+
+```java
+@Scheduled(fixedDelay = 3000)
+public void reconcile() {
+    List<PipelineRecord> pipelines = repository.findAll();
+
+    for (PipelineRecord pipeline : pipelines) {
+        RuntimeState actual = runtimeManager.getActualState(pipeline.getId());
+
+        if (pipeline.wantRunning() && !actual.isRunningOrStarting()) {
+            lifecycleService.startRuntime(pipeline);
+        }
+
+        if (pipeline.wantStopped() && actual.isRunningOrStarting()) {
+            lifecycleService.stopRuntime(pipeline.getId());
+        }
+    }
+}
+```
+
+Start and stop operations should still be executed through a bounded `ExecutorService`, so one slow Kafka connection does not block reconciliation for all pipelines.
+
+Spring events can still be useful, but they should be treated as side effects rather than the main lifecycle engine:
+
+```text
+PipelineStartedEvent
+PipelineStoppedEvent
+PipelineFailedEvent
+PipelineStatusChangedEvent
+```
+
+Good event listener responsibilities:
+
+- audit logs;
+- metrics;
+- alerts;
+- WebSocket status push.
+
+Avoid putting the core start, stop, rollback, and persistence flow inside event listeners.
 
 ## Suggested Database Table
 
@@ -158,8 +304,11 @@ CREATE TABLE pipeline_config (
     id VARCHAR(128) PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     type VARCHAR(64) NOT NULL,
-    enabled BOOLEAN NOT NULL,
+    desired_status VARCHAR(32) NOT NULL,
     runtime_status VARCHAR(32) NOT NULL,
+    last_error CLOB,
+    version BIGINT NOT NULL,
+    updated_by VARCHAR(128),
     kafka_config_json CLOB NOT NULL,
     http_config_json CLOB NOT NULL,
     created_at TIMESTAMP NOT NULL,
@@ -172,16 +321,23 @@ CREATE TABLE pipeline_config (
 Recommended status values:
 
 ```text
+desired_status:
 RUNNING
 STOPPED
-FAILED
+
+runtime_status:
 STARTING
+RUNNING
 STOPPING
+STOPPED
+FAILED
 ```
 
-`enabled` should mean whether the pipeline should be restored automatically on the next application startup.
+`desired_status` should mean the operator's persistent intent and replaces the simpler `enabled` flag.
 
 `runtime_status` should describe the current or latest runtime state.
+
+`version` should be used for optimistic locking or lost-update protection when multiple operators issue commands at nearly the same time.
 
 ## Management API Shape
 
@@ -286,7 +442,7 @@ Pragmatic approach:
 - Add H2 and Spring JDBC.
 - Create `pipeline_config` table.
 - Migrate `data.json` pipelines into the database.
-- Add `id`, `enabled`, and `runtime_status` fields to the pipeline model.
+- Add `id`, `desired_status`, `runtime_status`, and `version` fields to the pipeline model.
 
 ### Phase 2: Runtime Lifecycle
 
